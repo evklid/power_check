@@ -5,7 +5,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 import time
 import os
 
@@ -24,6 +24,56 @@ def get_chrome_options():
     
     return chrome_options
 
+def close_popups(driver, wait):
+    """Закриває всі popup/modal вікна на сторінці"""
+    print("Перевіряємо наявність popup вікон...")
+    
+    try:
+        # Шукаємо кнопки закриття popup (різні варіанти селекторів)
+        close_buttons_selectors = [
+            "button.close",
+            "button[class*='close']",
+            "[class*='modal'] button",
+            "[class*='popup'] button",
+            "button[aria-label='Close']",
+            ".modal-close",
+            "[data-dismiss='modal']"
+        ]
+        
+        for selector in close_buttons_selectors:
+            try:
+                close_button = driver.find_element(By.CSS_SELECTOR, selector)
+                if close_button.is_displayed():
+                    print(f"Знайдено кнопку закриття popup: {selector}")
+                    close_button.click()
+                    time.sleep(1)
+                    print("Popup закрито")
+                    return True
+            except:
+                continue
+        
+        # Якщо не знайшли кнопку, спробуємо натиснути ESC
+        print("Кнопка закриття не знайдена, натискаємо ESC...")
+        from selenium.webdriver.common.action_chains import ActionChains
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+        time.sleep(1)
+        
+        # Або клікнути поза модальним вікном
+        try:
+            modal_overlay = driver.find_element(By.CSS_SELECTOR, "[class*='modal-backdrop'], [class*='overlay']")
+            if modal_overlay:
+                print("Клікаємо на overlay...")
+                modal_overlay.click()
+                time.sleep(1)
+        except:
+            pass
+            
+        return True
+        
+    except Exception as e:
+        print(f"Помилка при закритті popup: {e}")
+        return False
+
 def get_power_outage_info(city="Одеса", street="Марсельська", building="60"):
     """Функція для отримання інформації про відключення з сайту ДТЕК"""
     
@@ -41,100 +91,162 @@ def get_power_outage_info(city="Одеса", street="Марсельська", bu
         print("Чекаємо завантаження сторінки...")
         time.sleep(5)
         
-        # Шукаємо input поля (не select!)
-        # За скріншотом видно що це autocomplete поля
+        # Закриваємо popup якщо є
+        close_popups(driver, wait)
+        time.sleep(2)
         
-        # Поле для міста
-        print(f"Шукаємо поле для міста...")
-        city_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
+        # Шукаємо input поля
+        print(f"Шукаємо input поля...")
+        text_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
         
-        if len(city_inputs) >= 3:
-            city_input = city_inputs[0]  # Перше поле - місто
-            street_input = city_inputs[1]  # Друге поле - вулиця
-            building_input = city_inputs[2]  # Третє поле - будинок
+        print(f"Знайдено {len(text_inputs)} текстових полів")
+        
+        if len(text_inputs) >= 3:
+            city_input = text_inputs[0]
+            street_input = text_inputs[1]
+            building_input = text_inputs[2]
             
-            # Вводимо місто
+            # Місто
             print(f"Вводимо місто: {city}")
-            city_input.click()
-            time.sleep(1)
-            city_input.send_keys(city)
-            time.sleep(2)
-            
-            # Чекаємо на випадаючий список і вибираємо перший варіант
             try:
-                # Шукаємо випадаючий список autocomplete
-                autocomplete_items = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class*='autocomplete'] li, [class*='dropdown'] li, .autocomplete-item")))
-                if autocomplete_items:
-                    print(f"Знайдено {len(autocomplete_items)} варіантів для міста")
-                    # Вибираємо перший що містить наше місто
-                    for item in autocomplete_items:
-                        if city in item.text:
-                            item.click()
-                            break
-                else:
-                    # Якщо не знайшли список, просто натискаємо Enter
+                # Скролимо до елемента
+                driver.execute_script("arguments[0].scrollIntoView(true);", city_input)
+                time.sleep(1)
+                
+                # Клікаємо через JavaScript якщо звичайний клік не працює
+                try:
+                    city_input.click()
+                except ElementClickInterceptedException:
+                    print("Звичайний клік не спрацював, використовуємо JavaScript...")
+                    driver.execute_script("arguments[0].click();", city_input)
+                
+                time.sleep(1)
+                city_input.clear()
+                city_input.send_keys(city)
+                time.sleep(3)
+                
+                # Шукаємо autocomplete список
+                try:
+                    autocomplete = wait.until(EC.presence_of_all_elements_located((
+                        By.CSS_SELECTOR, 
+                        "[id*='autocomplete'] li, [class*='autocomplete'] li, [role='option']"
+                    )))
+                    
+                    if autocomplete:
+                        print(f"Знайдено {len(autocomplete)} варіантів autocomplete")
+                        # Клікаємо на перший варіант що містить наше місто
+                        for item in autocomplete:
+                            if city.lower() in item.text.lower():
+                                print(f"Вибираємо: {item.text}")
+                                item.click()
+                                break
+                        else:
+                            # Якщо не знайшли точний збіг, клікаємо перший
+                            autocomplete[0].click()
+                except TimeoutException:
+                    print("Autocomplete не з'явився, натискаємо Enter")
                     city_input.send_keys(Keys.ENTER)
-            except:
-                city_input.send_keys(Keys.ENTER)
+                
+                time.sleep(2)
+                
+            except Exception as e:
+                print(f"Помилка при введенні міста: {e}")
+                return {
+                    "success": False,
+                    "error": f"Не вдалось ввести місто: {str(e)}",
+                    "address": f"м. {city}, вул. {street}, {building}"
+                }
             
-            time.sleep(2)
-            
-            # Вводимо вулицю
+            # Вулиця
             print(f"Вводимо вулицю: {street}")
-            street_input.click()
-            time.sleep(1)
-            street_input.send_keys(street)
-            time.sleep(2)
-            
             try:
-                autocomplete_items = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class*='autocomplete'] li, [class*='dropdown'] li, .autocomplete-item")))
-                if autocomplete_items:
-                    print(f"Знайдено {len(autocomplete_items)} варіантів для вулиці")
-                    for item in autocomplete_items:
-                        if street in item.text:
-                            item.click()
-                            break
-                else:
+                driver.execute_script("arguments[0].scrollIntoView(true);", street_input)
+                time.sleep(1)
+                
+                try:
+                    street_input.click()
+                except ElementClickInterceptedException:
+                    driver.execute_script("arguments[0].click();", street_input)
+                
+                time.sleep(1)
+                street_input.clear()
+                street_input.send_keys(street)
+                time.sleep(3)
+                
+                try:
+                    autocomplete = wait.until(EC.presence_of_all_elements_located((
+                        By.CSS_SELECTOR,
+                        "[id*='autocomplete'] li, [class*='autocomplete'] li, [role='option']"
+                    )))
+                    
+                    if autocomplete:
+                        print(f"Знайдено {len(autocomplete)} варіантів для вулиці")
+                        for item in autocomplete:
+                            if street.lower() in item.text.lower():
+                                print(f"Вибираємо: {item.text}")
+                                item.click()
+                                break
+                        else:
+                            autocomplete[0].click()
+                except TimeoutException:
                     street_input.send_keys(Keys.ENTER)
-            except:
-                street_input.send_keys(Keys.ENTER)
+                
+                time.sleep(2)
+                
+            except Exception as e:
+                print(f"Помилка при введенні вулиці: {e}")
             
-            time.sleep(2)
-            
-            # Вводимо номер будинку
+            # Будинок
             print(f"Вводимо будинок: {building}")
-            building_input.click()
-            time.sleep(1)
-            building_input.send_keys(building)
-            time.sleep(2)
-            
             try:
-                autocomplete_items = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class*='autocomplete'] li, [class*='dropdown'] li, .autocomplete-item")))
-                if autocomplete_items:
-                    print(f"Знайдено {len(autocomplete_items)} варіантів для будинку")
-                    for item in autocomplete_items:
-                        if building in item.text:
-                            item.click()
-                            break
-                else:
+                driver.execute_script("arguments[0].scrollIntoView(true);", building_input)
+                time.sleep(1)
+                
+                try:
+                    building_input.click()
+                except ElementClickInterceptedException:
+                    driver.execute_script("arguments[0].click();", building_input)
+                
+                time.sleep(1)
+                building_input.clear()
+                building_input.send_keys(building)
+                time.sleep(3)
+                
+                try:
+                    autocomplete = wait.until(EC.presence_of_all_elements_located((
+                        By.CSS_SELECTOR,
+                        "[id*='autocomplete'] li, [class*='autocomplete'] li, [role='option']"
+                    )))
+                    
+                    if autocomplete:
+                        print(f"Знайдено {len(autocomplete)} варіантів для будинку")
+                        for item in autocomplete:
+                            if building in item.text:
+                                print(f"Вибираємо: {item.text}")
+                                item.click()
+                                break
+                        else:
+                            autocomplete[0].click()
+                except TimeoutException:
                     building_input.send_keys(Keys.ENTER)
-            except:
-                building_input.send_keys(Keys.ENTER)
-            
-            time.sleep(4)
+                
+                time.sleep(4)
+                
+            except Exception as e:
+                print(f"Помилка при введенні будинку: {e}")
             
             # Шукаємо результат
             print("Шукаємо результат...")
             
             try:
-                # Шукаємо блок з інформацією
-                result_element = wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Орієнтовний час') or contains(text(), 'відсутня електроенергія') or contains(text(), 'електроенергія')]")))
+                result_element = wait.until(EC.presence_of_element_located((
+                    By.XPATH,
+                    "//*[contains(text(), 'Орієнтовний час') or contains(text(), 'відсутня електроенергія') or contains(text(), 'відключення')]"
+                )))
                 
-                # Знаходимо батьківський контейнер
-                parent = result_element.find_element(By.XPATH, "./ancestor::div[contains(@class, 'alert') or contains(@class, 'info') or contains(@class, 'result') or contains(@class, 'message')]")
+                parent = result_element.find_element(By.XPATH, "./ancestor::div[1]")
                 full_info = parent.text
                 
-                # Витягуємо рядок з часом
                 lines = full_info.split('\n')
                 restoration_time = ""
                 
@@ -144,7 +256,7 @@ def get_power_outage_info(city="Одеса", street="Марсельська", bu
                         break
                 
                 if not restoration_time and lines:
-                    restoration_time = lines[0] if len(lines) > 0 else "Інформація не знайдена"
+                    restoration_time = lines[0]
                 
                 return {
                     "success": True,
@@ -154,30 +266,17 @@ def get_power_outage_info(city="Одеса", street="Марсельська", bu
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
                 
-            except Exception as e:
-                print(f"Помилка при пошуку результату: {e}")
-                
-                # Спробуємо отримати весь текст сторінки
-                page_text = driver.find_element(By.TAG_NAME, "body").text
-                
-                if "відсутня електроенергія" in page_text or "відключення" in page_text.lower():
-                    return {
-                        "success": True,
-                        "restoration_time": "Є відключення, але не вдалось витягнути точний час",
-                        "full_info": "Перевірте сайт ДТЕК вручну для деталей",
-                        "address": f"м. {city}, вул. {street}, {building}",
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Не вдалось знайти результат: {str(e)}",
-                        "address": f"м. {city}, вул. {street}, {building}"
-                    }
+            except TimeoutException:
+                print("Результат не знайдено за 20 секунд")
+                return {
+                    "success": False,
+                    "error": "Не вдалось знайти результат на сторінці. Можливо адреса введена некоректно.",
+                    "address": f"м. {city}, вул. {street}, {building}"
+                }
         else:
             return {
                 "success": False,
-                "error": f"Знайдено {len(city_inputs)} input полів, очікувалось щонайменше 3",
+                "error": f"Знайдено {len(text_inputs)} input полів, очікувалось щонайменше 3",
                 "address": f"м. {city}, вул. {street}, {building}"
             }
             
@@ -200,14 +299,13 @@ def home():
     """Головна сторінка API"""
     return jsonify({
         "message": "DTEK Power Outage API",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "status": "running on Render.com",
-        "note": "Now using autocomplete inputs instead of select dropdowns",
+        "note": "Fixed popup blocking and element click issues",
         "endpoints": {
             "/": "GET - Інформація про API",
             "/health": "GET - Перевірка роботи API",
-            "/check": "GET - Перевірити відключення",
-            "/debug": "GET - Діагностична інформація"
+            "/check": "GET - Перевірити відключення"
         },
         "parameters": {
             "city": "Назва міста (за замовчуванням: Одеса)",
@@ -228,42 +326,6 @@ def health():
         "message": "API працює нормально",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     })
-
-@app.route('/debug')
-def debug():
-    """Діагностичний endpoint"""
-    driver = None
-    try:
-        chrome_options = get_chrome_options()
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
-        
-        time.sleep(5)
-        
-        text_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-        all_inputs = driver.find_elements(By.TAG_NAME, "input")
-        
-        return jsonify({
-            "page_title": driver.title,
-            "url": driver.current_url,
-            "text_inputs_count": len(text_inputs),
-            "all_inputs_count": len(all_inputs),
-            "text_inputs_info": [
-                {
-                    "name": inp.get_attribute("name"),
-                    "id": inp.get_attribute("id"),
-                    "placeholder": inp.get_attribute("placeholder"),
-                    "class": inp.get_attribute("class")
-                } for inp in text_inputs[:5]  # Перші 5
-            ]
-        })
-    except Exception as e:
-        return jsonify({
-            "error": str(e)
-        })
-    finally:
-        if driver:
-            driver.quit()
 
 @app.route('/check')
 def check_outage():
