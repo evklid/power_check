@@ -20,28 +20,66 @@ def get_chrome_options():
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     return chrome_options
 
-def select_from_dropdown(driver, wait, field_id, value):
-    """Надійна логіка вибору з випадаючого списку"""
-    # 1. Чекаємо, поки поле стане доступним 
-    element = wait.until(EC.element_to_be_clickable((By.ID, field_id)))
-    
-    # 2. Клікаємо та очищуємо через JS для надійності
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    element.click()
-    element.send_keys(Keys.CONTROL + "a")
-    element.send_keys(Keys.BACKSPACE)
-    
-    # 3. Посимвольне введення (імітація людини для спрацювання JS-фільтрів)
-    for char in value:
-        element.send_keys(char)
-        time.sleep(0.1)
-    
-    # 4. Чекаємо появи списку та вибираємо перший варіант клавішами
-    time.sleep(2) # Час на появу dropdown
-    element.send_keys(Keys.ARROW_DOWN)
-    time.sleep(0.5)
-    element.send_keys(Keys.ENTER)
-    time.sleep(1.5) # Пауза для активації наступного поля
+def get_power_outage_info(city="Одеса", street="Марсельська", building="60"):
+    driver = None
+    try:
+        chrome_options = get_chrome_options()
+        driver = webdriver.Chrome(options=chrome_options)
+        wait = WebDriverWait(driver, 15) # Додаємо явне очікування
+        
+        driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
+        time.sleep(5)
+        
+        # Закриваємо попап
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+        time.sleep(1)
+
+        # 1. МІСТО
+        city_field = wait.until(EC.element_to_be_clickable((By.ID, "city")))
+        city_field.clear()
+        city_field.send_keys(city)
+        time.sleep(2)
+        city_field.send_keys(Keys.ARROW_DOWN)
+        city_field.send_keys(Keys.ENTER)
+        
+        # 2. ВУЛИЦЯ (Чекаємо, поки сайт її розблокує)
+        time.sleep(2) 
+        street_field = wait.until(EC.element_to_be_clickable((By.ID, "street")))
+        street_field.clear()
+        street_field.send_keys(street)
+        time.sleep(2)
+        street_field.send_keys(Keys.ARROW_DOWN)
+        street_field.send_keys(Keys.ENTER)
+
+        # 3. БУДИНОК
+        time.sleep(2)
+        house_field = wait.until(EC.element_to_be_clickable((By.ID, "house_num")))
+        house_field.clear()
+        house_field.send_keys(building)
+        time.sleep(2)
+        house_field.send_keys(Keys.ARROW_DOWN)
+        house_field.send_keys(Keys.ENTER)
+
+        # Чекаємо на результат
+        time.sleep(5)
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        
+        # Логіка пошуку ключів
+        keywords = ["Орієнтовний час", "відсутня електроенергія", "За вашою адресою", "Екстрені відключення"]
+        found = any(kw in body_text for kw in keywords)
+
+        return {
+            "success": True,
+            "is_outage": found,
+            "address": f"{city}, {street}, {building}",
+            "full_info": body_text[:1000] if found else "Відключень не знайдено"
+        }
+            
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        if driver:
+            driver.quit()
 
 @app.route('/check')
 def check_outage():
