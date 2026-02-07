@@ -26,7 +26,7 @@ RUN CHROMEDRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RE
     chmod +x /usr/local/bin/chromedriver
 
 # Копіюємо файли проекту
-COPY requirements_render.txt requirements.txt
+COPY requirements.txt requirements.txt
 COPY render_app.py app.py
 
 # Встановлюємо Python залежності
