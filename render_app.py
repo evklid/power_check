@@ -5,164 +5,43 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 import time
 import os
-import base64
 
 app = Flask(__name__)
 
 def get_chrome_options():
-    """Налаштування Chrome"""
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    
     return chrome_options
 
-def get_power_outage_info(city="Одеса", street="Марсельська", building="60"):
-    """Спрощена версія з мінімальною логікою"""
+def select_from_dropdown(driver, wait, field_id, value):
+    """Надійна логіка вибору з випадаючого списку"""
+    # 1. Чекаємо, поки поле стане доступним 
+    element = wait.until(EC.element_to_be_clickable((By.ID, field_id)))
     
-    driver = None
-    try:
-        chrome_options = get_chrome_options()
-        driver = webdriver.Chrome(options=chrome_options)
-        wait = WebDriverWait(driver, 15)
-        
-        print("Відкриваємо сайт...")
-        driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
-        time.sleep(7)  # Збільшили час очікування
-        
-        # Закриваємо popup через ESC
-        print("Закриваємо popup...")
-        from selenium.webdriver.common.action_chains import ActionChains
-        for _ in range(3):
-            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-            time.sleep(0.5)
-        
-        # Словник полів з їх ID
-        steps = [
-            {"id": "city", "value": city, "name": "місто"},
-            {"id": "street", "value": street, "name": "вулиця"},
-            {"id": "house_num", "value": building, "name": "будинок"}
-        ]
-
-        for step in steps:
-            print(f"Обробка поля: {step['name']}")
-            
-            # Чекаємо, поки поле стане клікабельним 
-            el = wait.until(EC.element_to_be_clickable((By.ID, step['id'])))
-            
-            # Прокрутка до поля
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
-            time.sleep(0.5)
-            
-            # Введення тексту
-            el.clear()
-            for char in step['value']:
-                el.send_keys(char)
-                time.sleep(0.1)
-            
-            # Чекаємо випадаючий список та обираємо перший варіант
-            time.sleep(2) 
-            el.send_keys(Keys.ARROW_DOWN)
-            time.sleep(0.5)
-            el.send_keys(Keys.ENTER)
-            
-            # Даємо час скриптам сайту розблокувати наступне поле
-            time.sleep(2)
-
-        # 2. Очікування результату
-        print("Шукаємо блок з результатом...")
-        # Шукаємо жовтий блок або текст про відключення
-        time.sleep(5)
-        
-        try:
-            # Спроба знайти фінальний текст результату
-            result_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "is-open")))
-            res_text = result_element.text
-        except:
-            # Якщо специфічний клас не знайдено, беремо весь текст
-            res_text = driver.find_element(By.TAG_NAME, "body").text
-
-        if "відсутня електроенергія" in res_text or "Екстрені відключення" in res_text:
-            return {
-                "success": True,
-                "status": "OFF",
-                "info": res_text.split("Увага!")[0].strip(), # Беремо основну частину до примітки
-                "address": f"{city}, {street}, {building}"
-            }
-        else:
-            return {
-                "success": True,
-                "status": "ON",
-                "info": "За цією адресою відключень не знайдено (або графіки не діють)",
-                "address": f"{city}, {street}, {building}"
-            }
-
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-    finally:
-        if driver: driver.quit()
-
-@app.route('/')
-def home():
-    return jsonify({
-        "message": "DTEK API",
-        "version": "1.5.0 - Simplified",
-        "endpoints": {
-            "/health": "Health check",
-            "/check": "Check outage (params: city, street, building)",
-            "/test": "Test page access and form fields"
-        }
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy", "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")})
-
-@app.route('/test')
-def test():
-    """Тестовий endpoint - просто відкриває сторінку і дивиться що там є"""
-    driver = None
-    try:
-        chrome_options = get_chrome_options()
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
-        time.sleep(5)
-        
-        # Закриваємо popup
-        from selenium.webdriver.common.action_chains import ActionChains
-        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-        time.sleep(1)
-        
-        all_inputs = driver.find_elements(By.TAG_NAME, "input")
-        text_inputs = [inp for inp in all_inputs if inp.get_attribute("type") == "text"]
-        
-        return jsonify({
-            "page_title": driver.title,
-            "total_inputs": len(all_inputs),
-            "text_inputs": len(text_inputs),
-            "text_inputs_details": [
-                {
-                    "placeholder": inp.get_attribute("placeholder"),
-                    "name": inp.get_attribute("name"),
-                    "id": inp.get_attribute("id"),
-                    "visible": inp.is_displayed(),
-                    "enabled": inp.is_enabled()
-                }
-                for inp in text_inputs[:5]
-            ],
-            "page_text_preview": driver.find_element(By.TAG_NAME, "body").text[:500]
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)})
-    finally:
-        if driver:
-            driver.quit()
+    # 2. Клікаємо та очищуємо через JS для надійності
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+    element.click()
+    element.send_keys(Keys.CONTROL + "a")
+    element.send_keys(Keys.BACKSPACE)
+    
+    # 3. Посимвольне введення (імітація людини для спрацювання JS-фільтрів)
+    for char in value:
+        element.send_keys(char)
+        time.sleep(0.1)
+    
+    # 4. Чекаємо появи списку та вибираємо перший варіант клавішами
+    time.sleep(2) # Час на появу dropdown
+    element.send_keys(Keys.ARROW_DOWN)
+    time.sleep(0.5)
+    element.send_keys(Keys.ENTER)
+    time.sleep(1.5) # Пауза для активації наступного поля
 
 @app.route('/check')
 def check_outage():
@@ -170,13 +49,52 @@ def check_outage():
     street = request.args.get('street', 'Марсельська')
     building = request.args.get('building', '60')
     
-    print(f"\n{'='*50}")
-    print(f"ЗАПИТ: {city}, {street}, {building}")
-    print(f"{'='*50}\n")
-    
-    result = get_power_outage_info(city, street, building)
-    return jsonify(result)
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=get_chrome_options())
+        wait = WebDriverWait(driver, 20)
+        
+        driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
+        
+        # Обробка попапу через примусове натискання ESC декілька разів
+        time.sleep(5) 
+        for _ in range(3):
+            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+            time.sleep(0.5)
+
+        # Почергове заповнення полів за їх реальними ID
+        select_from_dropdown(driver, wait, "city", city)
+        select_from_dropdown(driver, wait, "street", street)
+        select_from_dropdown(driver, wait, "house_num", building)
+
+        # Очікування результату
+        time.sleep(5)
+        
+        # Шукаємо текст результату
+        try:
+            # Шукаємо за класом, який з'являється при видачі результату
+            res_element = driver.find_element(By.CSS_SELECTOR, ".shutdown-search-result, .is-open")
+            full_text = res_element.text
+        except:
+            # Якщо блок не знайдено, беремо текст всієї сторінки
+            full_text = driver.find_element(By.TAG_NAME, "body").text
+
+        # Логіка визначення статусу
+        is_off = any(word in full_text for word in ["відсутня електроенергія", "Екстрені відключення"])
+        
+        return jsonify({
+            "success": True,
+            "status": "OFF" if is_off else "ON",
+            "address": f"{city}, {street}, {building}",
+            "info": full_text.strip()[:1000],
+            "timestamp": time.strftime("%H:%M:%S")
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+    finally:
+        if driver:
+            driver.quit()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=5000)
