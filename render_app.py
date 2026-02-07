@@ -16,64 +16,55 @@ def get_chrome_options():
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     return chrome_options
 
-def get_power_outage_info(city="Одеса", street="Марсельська", building="60"):
+def get_power_outage_info(city, street, building):
     driver = None
     try:
-        chrome_options = get_chrome_options()
-        driver = webdriver.Chrome(options=chrome_options)
-        wait = WebDriverWait(driver, 20) 
+        driver = webdriver.Chrome(options=get_chrome_options())
+        wait = WebDriverWait(driver, 15)
         
         driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
-        time.sleep(7)
+        time.sleep(5)
         
-        # Закриваємо popup через ESC
+        # Закриваємо попап (ESC)
         ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-        time.sleep(1)
         
-        fields = [
-            ("city", city, "місто"),
-            ("street", street, "вулиця"),
-            ("house_num", building, "будинок")
+        # Список полів для заповнення з їх реальними ID
+        steps = [
+            ("city", city),
+            ("street", street),
+            ("house_num", building)
         ]
         
-        for field_id, value, name in fields:
-            # Чекаємо, поки поле стане активним (enabled: true)
-            # Це виправляє помилку "Element is not currently interactable"
-            field = wait.until(EC.element_to_be_clickable((By.ID, field_id)))
+        for field_id, value in steps:
+            # ЧЕКАЄМО, поки поле стане активним (enabled: true)
+            el = wait.until(EC.element_to_be_clickable((By.ID, field_id)))
             
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", field)
-            field.clear()
-            
-            # Вводимо текст посимвольно
+            el.clear()
             for char in value:
-                field.send_keys(char)
+                el.send_keys(char)
                 time.sleep(0.1)
             
-            time.sleep(2.5) # Чекаємо на dropdown список
-            field.send_keys(Keys.ARROW_DOWN)
+            time.sleep(2) # Час на появу списку
+            el.send_keys(Keys.ARROW_DOWN)
             time.sleep(0.5)
-            field.send_keys(Keys.ENTER)
-            time.sleep(1.5) # Пауза, щоб сайт активував наступне поле
+            el.send_keys(Keys.ENTER)
+            time.sleep(1) # Пауза для активації наступного поля сайтом
 
-        # Чекаємо на фінальний результат
-        time.sleep(6)
+        # Очікуємо появу результату (жовтий блок)
+        time.sleep(5)
         body_text = driver.find_element(By.TAG_NAME, "body").text
         
-        # Пошук ключових слів
-        is_outage = any(kw in body_text for kw in ["відсутня електроенергія", "Екстрені відключення", "Орієнтовний час"])
+        is_off = "відсутня електроенергія" in body_text or "Екстрені відключення" in body_text
         
         return {
             "success": True,
-            "is_outage": is_outage,
+            "status": "OFF" if is_off else "ON",
             "address": f"{city}, {street}, {building}",
-            "info": body_text[:800] if is_outage else "Відключень не знайдено"
+            "info": body_text[:500]
         }
-            
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
