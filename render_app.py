@@ -30,6 +30,7 @@ def get_power_outage_info(city="Одеса", street="Марсельська", bu
     try:
         chrome_options = get_chrome_options()
         driver = webdriver.Chrome(options=chrome_options)
+        wait = WebDriverWait(driver, 15)
         
         print("Відкриваємо сайт...")
         driver.get("https://www.dtek-oem.com.ua/ua/shutdowns")
@@ -42,137 +43,70 @@ def get_power_outage_info(city="Одеса", street="Марсельська", bu
             ActionChains(driver).send_keys(Keys.ESCAPE).perform()
             time.sleep(0.5)
         
-        # Знаходимо ВСІ input поля
-        print("Шукаємо input поля...")
-        all_inputs = driver.find_elements(By.TAG_NAME, "input")
-        text_inputs = [inp for inp in all_inputs if inp.get_attribute("type") == "text"]
+        # Словник полів з їх ID
+        steps = [
+            {"id": "city", "value": city, "name": "місто"},
+            {"id": "street", "value": street, "name": "вулиця"},
+            {"id": "house_num", "value": building, "name": "будинок"}
+        ]
+
+        for step in steps:
+            print(f"Обробка поля: {step['name']}")
+            
+            # Чекаємо, поки поле стане клікабельним 
+            el = wait.until(EC.element_to_be_clickable((By.ID, step['id'])))
+            
+            # Прокрутка до поля
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+            time.sleep(0.5)
+            
+            # Введення тексту
+            el.clear()
+            for char in step['value']:
+                el.send_keys(char)
+                time.sleep(0.1)
+            
+            # Чекаємо випадаючий список та обираємо перший варіант
+            time.sleep(2) 
+            el.send_keys(Keys.ARROW_DOWN)
+            time.sleep(0.5)
+            el.send_keys(Keys.ENTER)
+            
+            # Даємо час скриптам сайту розблокувати наступне поле
+            time.sleep(2)
+
+        # 2. Очікування результату
+        print("Шукаємо блок з результатом...")
+        # Шукаємо жовтий блок або текст про відключення
+        time.sleep(5)
         
-        print(f"Всього inputs: {len(all_inputs)}, текстових: {len(text_inputs)}")
-        
-        if len(text_inputs) < 3:
-            # Можливо поля ще не завантажились
-            time.sleep(3)
-            all_inputs = driver.find_elements(By.TAG_NAME, "input")
-            text_inputs = [inp for inp in all_inputs if inp.get_attribute("type") == "text"]
-            print(f"Після додаткового очікування: {len(text_inputs)} текстових полів")
-        
-        if len(text_inputs) >= 3:
-            # ПРОСТИЙ ПІДХІД: просто вводимо текст і натискаємо Enter/Tab
-            fields = [
-                (text_inputs[0], city, "місто"),
-                (text_inputs[1], street, "вулиця"),  
-                (text_inputs[2], building, "будинок")
-            ]
-            
-            for field, value, name in fields:
-                print(f"\n--- Поле: {name} ---")
-                try:
-                    # Скролимо
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", field)
-                    time.sleep(0.5)
-                    
-                    # Фокус через JS
-                    driver.execute_script("arguments[0].focus();", field)
-                    time.sleep(0.3)
-                    
-                    # Очищаємо
-                    field.clear()
-                    time.sleep(0.3)
-                    
-                    # Вводимо по одному символу (імітуємо людину)
-                    for char in value:
-                        field.send_keys(char)
-                        time.sleep(0.1)
-                    
-                    print(f"Введено: {value}")
-                    time.sleep(2)  # Чекаємо появу dropdown
-                    
-                    # Просто натискаємо стрілку вниз і Enter
-                    field.send_keys(Keys.ARROW_DOWN)
-                    time.sleep(0.5)
-                    field.send_keys(Keys.ENTER)
-                    time.sleep(1)
-                    
-                    print(f"✓ {name} заповнено")
-                    
-                except Exception as e:
-                    print(f"✗ Помилка для {name}: {e}")
-                    return {
-                        "success": False,
-                        "error": f"Не вдалось ввести {name}: {str(e)}",
-                        "address": f"м. {city}, вул. {street}, {building}"
-                    }
-            
-            # Після заповнення всіх полів чекаємо на результат
-            print("\nЧекаємо на результат...")
-            time.sleep(8)  # Даємо більше часу на завантаження
-            
-            # Отримуємо весь текст сторінки
-            body_text = driver.find_element(By.TAG_NAME, "body").text
-            print(f"Отримано {len(body_text)} символів тексту")
-            
-            # Шукаємо ключові фрази
-            keywords = ["Орієнтовний час", "відсутня електроенергія", "За вашою адресою", 
-                       "відключення", "електроенергія", "відновлення"]
-            
-            found_keywords = [kw for kw in keywords if kw in body_text]
-            print(f"Знайдено ключові слова: {found_keywords}")
-            
-            if found_keywords:
-                # Витягуємо релевантні рядки
-                lines = body_text.split('\n')
-                result_lines = []
-                
-                for i, line in enumerate(lines):
-                    if any(kw in line for kw in keywords):
-                        # Беремо 5 рядків до і 5 після
-                        start = max(0, i-2)
-                        end = min(len(lines), i+8)
-                        result_lines = lines[start:end]
-                        break
-                
-                full_info = '\n'.join(result_lines)
-                
-                # Шукаємо час відновлення
-                restoration_time = ""
-                for line in result_lines:
-                    if "Орієнтовний час відновлення" in line or "до" in line and ":" in line:
-                        restoration_time = line
-                        break
-                
-                return {
-                    "success": True,
-                    "restoration_time": restoration_time if restoration_time else result_lines[0] if result_lines else "Знайдено інформацію",
-                    "full_info": full_info if full_info else body_text[:500],
-                    "address": f"м. {city}, вул. {street}, {building}",
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "Ключові слова не знайдені на сторінці",
-                    "debug_text": body_text[:800],
-                    "address": f"м. {city}, вул. {street}, {building}"
-                }
+        try:
+            # Спроба знайти фінальний текст результату
+            result_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "is-open")))
+            res_text = result_element.text
+        except:
+            # Якщо специфічний клас не знайдено, беремо весь текст
+            res_text = driver.find_element(By.TAG_NAME, "body").text
+
+        if "відсутня електроенергія" in res_text or "Екстрені відключення" in res_text:
+            return {
+                "success": True,
+                "status": "OFF",
+                "info": res_text.split("Увага!")[0].strip(), # Беремо основну частину до примітки
+                "address": f"{city}, {street}, {building}"
+            }
         else:
             return {
-                "success": False,
-                "error": f"Знайдено {len(text_inputs)} текстових полів (потрібно 3)",
-                "address": f"м. {city}, вул. {street}, {building}"
+                "success": True,
+                "status": "ON",
+                "info": "За цією адресою відключень не знайдено (або графіки не діють)",
+                "address": f"{city}, {street}, {building}"
             }
-            
+
     except Exception as e:
-        print(f"ПОМИЛКА: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
+        return {"success": False, "error": str(e)}
     finally:
-        if driver:
-            driver.quit()
+        if driver: driver.quit()
 
 @app.route('/')
 def home():
