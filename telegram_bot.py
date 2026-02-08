@@ -150,7 +150,7 @@ def check_power_outage(city, street, building):
             full_text = result_div.text
             
             if "відсутня електроенергія" in full_text or "відключення" in full_text.lower():
-                lines = full_text.split('\n')
+                lines = [line.strip() for line in full_text.split('\n') if line.strip()]
                 
                 cause = ""
                 start_time = ""
@@ -158,8 +158,8 @@ def check_power_outage(city, street, building):
                 
                 for i, line in enumerate(lines):
                     if line.strip().startswith("Причина:"):
-                        if i + 1 < len(lines):
-                            cause_line = lines[i + 1].strip()
+                       if "Причина:" in line and i + 1 < len(lines):
+                            cause = lines[i + 1]
                             if cause_line and not cause_line.startswith("Час"):
                                 cause = cause_line
                     
@@ -233,7 +233,7 @@ async def city_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🏙 Місто: {city}\n\n"
         f"🛣 Тепер введіть назву вулиці:\n"
-        f"(Наприклад: Марсельська, Хрещатик)"
+        f"(Наприклад: Весняна, Перемоги)"
     )
     return STREET
 
@@ -245,7 +245,7 @@ async def street_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🏙 Місто: {context.user_data['city']}\n"
         f"🛣 Вулиця: {street}\n\n"
         f"🏠 Введіть номер будинку:\n"
-        f"(Наприклад: 60, 15А)"
+        f"(Наприклад: 37, 15А)"
     )
     return BUILDING
 
@@ -286,8 +286,8 @@ async def perform_check_and_reply(update, context, city, street, building):
             message = (
                 f"🪫 За адресою *м. {city}, вул. {street}, {building}* зафіксовано відключення.\n\n"
                 f"Причина: {result['cause']}.\n\n"
-                f"🕦 Час початку: {result['start_time']}.\n"
-                f"🕦 Орієнтовний час відновлення електроенергії: {result['restoration_time']}."
+                f"🕯 Час початку: {result['start_time']}.\n"
+                f"💡 Орієнтовний час відновлення електроенергії: {result['restoration_time']}."
             )
         else:
             message = (
