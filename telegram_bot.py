@@ -147,45 +147,32 @@ def check_power_outage(city, street, building):
                 EC.presence_of_element_located((By.CSS_SELECTOR, "#showCurOutage.active, div.active"))
             )
             
-            full_text = result_div.text
+            full_text = result_div.get_attribute('innerText')
+            lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+            
+            cause = "Не вказано"
+            start_time = "Не вказано"
+            restoration_time = "Не вказано"
+
+            for i, line in enumerate(lines):
+                if "Причина:" in line and i + 1 < len(lines):
+                    cause = lines[i + 1]
+                
+                time_match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', line)
+                if time_match:
+                    if "Час початку" in line:
+                        start_time = time_match.group(1)
+                    elif "Орієнтовний час" in line:
+                        restoration_time = time_match.group(1)
             
             if "відсутня електроенергія" in full_text or "відключення" in full_text.lower():
-                lines = [line.strip() for line in full_text.split('\n') if line.strip()]
-                
-                cause = ""
-                start_time = ""
-                restoration_time = ""
-                
-                for i, line in enumerate(lines):
-                    if line.strip().startswith("Причина:"):
-                       if "Причина:" in line and i + 1 < len(lines):
-                            cause = lines[i + 1]
-                            if cause_line and not cause_line.startswith("Час"):
-                                cause = cause_line
-                    
-                    if "Час початку" in line and "–" in line:
-                        parts = line.split("–")
-                        if len(parts) > 1:
-                            time_part = parts[1].strip()
-                            match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', time_part)
-                            if match:
-                                start_time = match.group(1)
-                    
-                    if "Орієнтовний час відновлення" in line and "–" in line:
-                        parts = line.split("–")
-                        if len(parts) > 1:
-                            time_part = parts[1].strip()
-                            match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', time_part)
-                            if match:
-                                restoration_time = match.group(1)
-                
                 return {
                     "success": True,
                     "has_outage": True,
                     "address": f"м. {city}, вул. {street}, {building}",
-                    "cause": cause if cause else "Не вказано",
-                    "start_time": start_time if start_time else "Не вказано",
-                    "restoration_time": restoration_time if restoration_time else "Не вказано"
+                    "cause": cause,
+                    "start_time": start_time,
+                    "restoration_time": restoration_time
                 }
             else:
                 return {
