@@ -11,6 +11,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException
 import time
+from flask import Flask
+import threading
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -24,6 +26,20 @@ if not TELEGRAM_BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is not set!")
 
 CITY, STREET, BUILDING = range(3)
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health():
+    return {'status': 'ok', 'message': 'Telegram bot is running'}, 200
+
+@flask_app.route('/health')
+def health_check():
+    return {'status': 'healthy'}, 200
+
+def run_flask():
+    port = int(os.environ.get('PORT', 10000))
+    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 def get_chrome_options():
     chrome_options = Options()
@@ -141,18 +157,27 @@ def check_power_outage(city, street, building):
                 restoration_time = ""
                 
                 for i, line in enumerate(lines):
-                    if "Причина:" in line and i + 1 < len(lines):
-                        cause = lines[i + 1].strip()
+                    if line.strip().startswith("Причина:"):
+                        if i + 1 < len(lines):
+                            cause_line = lines[i + 1].strip()
+                            if cause_line and not cause_line.startswith("Час"):
+                                cause = cause_line
                     
-                    if "Час початку" in line:
-                        match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', line)
-                        if match:
-                            start_time = match.group(1)
+                    if "Час початку" in line and "–" in line:
+                        parts = line.split("–")
+                        if len(parts) > 1:
+                            time_part = parts[1].strip()
+                            match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', time_part)
+                            if match:
+                                start_time = match.group(1)
                     
-                    if "Орієнтовний час відновлення" in line:
-                        match = re.search(r'до\s+(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', line)
-                        if match:
-                            restoration_time = match.group(1)
+                    if "Орієнтовний час відновлення" in line and "–" in line:
+                        parts = line.split("–")
+                        if len(parts) > 1:
+                            time_part = parts[1].strip()
+                            match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', time_part)
+                            if match:
+                                restoration_time = match.group(1)
                 
                 return {
                     "success": True,
@@ -208,7 +233,7 @@ async def city_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🏙 Місто: {city}\n\n"
         f"🛣 Тепер введіть назву вулиці:\n"
-        f"(Наприклад: Весняна)"
+        f"(Наприклад: Марсельська, Хрещатик)"
     )
     return STREET
 
@@ -342,7 +367,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-def main():
+def run_bot():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -362,8 +387,15 @@ def main():
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(button_callback, pattern='^repeat_check$'))
     
-    logger.info("Бот запущено!")
+    logger.info("Telegram бот запущено!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+def main():
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("Flask сервер запущено!")
+    
+    run_bot()
 
 if __name__ == '__main__':
     main()
