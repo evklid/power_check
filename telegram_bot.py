@@ -208,7 +208,7 @@ async def city_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🏙 Місто: {city}\n\n"
         f"🛣 Тепер введіть назву вулиці:\n"
-        f"(Наприклад: Марсельська, Хрещатик)"
+        f"(Наприклад: Весняна)"
     )
     return STREET
 
