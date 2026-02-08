@@ -150,13 +150,19 @@ def check_power_outage(city, street, building):
             full_text = result_div.get_attribute('innerText')
             lines = [line.strip() for line in full_text.split('\n') if line.strip()]
             
-            cause = "Не вказано"
-            start_time = "Не вказано"
-            restoration_time = "Не вказано"
+            cause = ""
+            start_time = ""
+            restoration_time = ""
 
             for i, line in enumerate(lines):
-                if "Причина:" in line and i + 1 < len(lines):
-                    cause = lines[i + 1]
+                if "Причина:" in line:
+                    content = line.replace("Причина:", "").strip()
+                    if content:
+                        cause = content
+                    elif i + 1 < len(lines):
+                        next_line = lines[i + 1]
+                        if "Час початку" not in next_line and not re.search(r'\d{2}:\d{2}', next_line):
+                            cause = next_line
                 
                 time_match = re.search(r'(\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})', line)
                 if time_match:
