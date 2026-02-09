@@ -171,14 +171,25 @@ def check_power_outage(city, street, building):
                     elif "Орієнтовний час" in line:
                         restoration_time = time_match.group(1)
             
-            if "відсутня електроенергія" in full_text or "відключення" in full_text.lower():
+            has_real_outage = False
+            
+            if "За вашою адресою в даний момент відсутня електроенергія" in full_text:
+                has_real_outage = True
+            elif cause and start_time:
+                has_real_outage = True
+            elif "Якщо в даний момент у вас відсутнє світло" in full_text:
+                has_real_outage = False
+            elif "імовірно виникла аварійна ситуація" in full_text:
+                has_real_outage = False
+            
+            if has_real_outage:
                 return {
                     "success": True,
                     "has_outage": True,
                     "address": f"м. {city}, вул. {street}, {building}",
-                    "cause": cause,
-                    "start_time": start_time,
-                    "restoration_time": restoration_time
+                    "cause": cause if cause else "Не вказано",
+                    "start_time": start_time if start_time else "Не вказано",
+                    "restoration_time": restoration_time if restoration_time else "Не вказано"
                 }
             else:
                 return {
